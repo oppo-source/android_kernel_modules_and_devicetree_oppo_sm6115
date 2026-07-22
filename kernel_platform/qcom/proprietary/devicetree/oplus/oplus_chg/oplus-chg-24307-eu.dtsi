@@ -35,8 +35,8 @@
 		track,wired_max_power = <45000>;
 		track,wired_fast_chg_scheme = <4>;
 		track,gauge_status_ctrl;
-		track,nominal_qmax1 = <5166>;
-		track,nominal_fcc1 = <4700>;
+		track,nominal_qmax1 = <6084>;
+		track,nominal_fcc1 = <5507>;
 		track,external_gauge_num = <1>;
 	};
 
@@ -804,14 +804,16 @@
 		io-channel-names = "usbtemp_r_v_chan",
 				"usbtemp_l_v_chan";
 		dep-supply = <&pm6125_vadc>;
-        //ntc switch gpio
-        qcom,ntc-switch-gpio = <&tlmm 85 0x00>;
+		/* ntc switch gpio */
+		qcom,ntc-switch-gpio = <&tlmm 85 0x00>;
 
 		pinctrl-names = "dischg_enable", "dischg_disable";
 
 		pinctrl-0 = <&dischg_enable>;
 		pinctrl-1 = <&dischg_disable>;
 
+		oplus_spec,dec-vol-fv-mv = <40>;
+		oplus,full_limit_curr_support;
 		qcom,support_abnormal_adapter;
 		qcom,input_current_charger_ma = <2000>;
 		qcom,pd_input_current_charger_ma = <1500>;
@@ -1053,6 +1055,7 @@
 		oplus,uart_tx-gpio = <&tlmm 12 0x00>;
 		oplus,uart_rx-gpio = <&tlmm 13 0x00>;
 		oplus,eco_common_support_region_list = <0x44>;
+		oplus,batt_full_time = <60>;
 	};
 };
 

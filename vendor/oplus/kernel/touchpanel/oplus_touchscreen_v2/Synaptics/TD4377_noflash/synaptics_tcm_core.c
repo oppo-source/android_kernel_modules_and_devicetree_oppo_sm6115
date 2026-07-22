@@ -1976,6 +1976,28 @@ retry:
 			UNLOCK_BUFFER(tcm_hcd->in);
 			retval = 0;
 			goto exit;
+		case STATUS_PREVIOUS_COMMAND_PENDING:
+			TPD_INFO("Incorrect header code (0x%02x) payload length(%d)\n",
+				tcm_hcd->status_report_code, tcm_hcd->payload_length);
+			UNLOCK_BUFFER(tcm_hcd->in);
+			if (tcm_hcd->payload_length) {
+				int i = 0;
+				retval = syna_tcm_continued_read(tcm_hcd);
+				if (retval < 0) {
+					TPD_INFO("Failed to do continued read\n");
+					retval = -EIO;
+					goto exit;
+				}
+				LOCK_BUFFER(tcm_hcd->in);
+				TPD_INFO("syna data begin\n");
+				for (i = 0; i < tcm_hcd->payload_length; i++) {
+					TPD_INFO("syna data[%d]:%x, ", i, tcm_hcd->in.buf[4 + i]);
+				}
+				TPD_INFO("syna data end\n");
+				UNLOCK_BUFFER(tcm_hcd->in);
+			}
+			retval = -EIO;
+			goto exit;
 		default:
 			if (tcm_hcd->health_monitor_support) {
 				tp_healthinfo_report(tcm_hcd->monitor_data, HEALTH_REPORT, "read_msg_err_header");
@@ -2977,8 +2999,6 @@ static u32 syna_trigger_reason(void *chip_data, int gesture_enable, int is_suspe
 	tcm_hcd->trigger_reason = 0;
 
 	if (tcm_hcd->zeroflash_init_done == 0) {
-		TPD_INFO("hdl not ready, disable irq\n");
-		disable_irq_nosync(tcm_hcd->s_client->irq);
 		return retval;
 	}
 
@@ -3060,7 +3080,7 @@ static int syna_tcm_sw_reset(struct syna_tcm_hcd *tcm_hcd)
 static int syna_tcm_before_switch_to_gesture_mode(struct syna_tcm_hcd *tcm_hcd, bool enable)
 {
 
-	if (enable) {
+	if (enable && !tcm_hcd->gesture_fw_finished_flag) {
 		/*set gesture fw mode flag = 1*/
 		tcm_hcd->request_fw_image_id = 1;
 		/*sw reset*/
@@ -3082,9 +3102,21 @@ static int syna_tcm_set_gesture_mode(struct syna_tcm_hcd *tcm_hcd, bool enable)
 	unsigned short config;
 	struct touchpanel_data *ts = spi_get_drvdata(tcm_hcd->s_client);
 
-	if (ts->lpwg_fw_support) {
-		/*request lpwg firmware*/
-		syna_tcm_before_switch_to_gesture_mode(tcm_hcd, enable);
+	TPD_INFO("func:%s, line:%d, ts->is_suspended =%d , enable =%d\n", __func__, __LINE__, ts->is_suspended, enable);
+
+	if (ts->is_suspended && enable == 0) {
+		tcm_hcd->gesture_fw_finished_flag = 1;
+	} else if (ts->is_suspended == 0){
+		tcm_hcd->gesture_fw_finished_flag = 0;
+	}
+
+	if (tcm_hcd->gesture_fw_finished_flag == 1) {
+		TPD_INFO("func:%s, line:%d, Enable Gesture After Hand Occlusion \n", __func__, __LINE__);
+	} else {
+		if (ts->lpwg_fw_support) {
+			/*request lpwg firmware*/
+			syna_tcm_before_switch_to_gesture_mode(tcm_hcd, enable);
+		}
 	}
 
 	/*this command may take too much time, if needed can add flag to skip this */
@@ -3232,19 +3264,27 @@ static int syna_tcm_set_glove_mode(struct syna_tcm_hcd *tcm_hcd, bool enable)
 static int syna_tcm_normal_mode(struct syna_tcm_hcd *tcm_hcd)
 {
 	int retval = 0;
+	struct touchpanel_data *ts = spi_get_drvdata(tcm_hcd->s_client);
 
-	retval = syna_set_input_reporting(tcm_hcd, false);
-	if (retval < 0) {
-		TPD_INFO("Failed to set input reporting\n");
-		return retval;
+	if (!ts) {
+		TPD_INFO("%s, ts is NULL\n", __func__);
+		return -EINVAL;
 	}
 
-	retval = syna_tcm_set_dynamic_config(tcm_hcd, DC_IN_WAKEUP_GESTURE_MODE, false);
-	if (retval < 0) {
-		TPD_INFO("Failed to set dynamic gesture config\n");
-		return retval;
-	}
+	TPD_INFO("%s, is_suspended=%d, suspend_state=%d\n", __func__, ts->is_suspended, ts->suspend_state);
+	if (!ts->is_suspended) {
+		retval = syna_set_input_reporting(tcm_hcd, false);
+		if (retval < 0) {
+			TPD_INFO("Failed to set input reporting\n");
+			return retval;
+		}
 
+		retval = syna_tcm_set_dynamic_config(tcm_hcd, DC_IN_WAKEUP_GESTURE_MODE, false);
+		if (retval < 0) {
+			TPD_INFO("Failed to set dynamic gesture config\n");
+			return retval;
+		}
+	}
 	return retval;
 }
 
@@ -3503,11 +3543,12 @@ static int syna_mode_switch(void *chip_data, work_mode mode, int flag)
 	TPD_INFO("syna_mode_switch begin, mode = %d\n", mode);
 	switch (mode) {
 	case MODE_NORMAL:
-		TPD_DETAIL("syna_mode_switch MODE_NORMAL\n");
-		/*ret = syna_tcm_normal_mode(tcm_hcd);*/
+		TPD_INFO("syna_mode_switch go to set MODE_NORMAL\n");
+		ret = syna_tcm_normal_mode(tcm_hcd);
 		if (ret < 0) {
 			TPD_INFO("normal mode switch failed\n");
 		}
+		TPD_INFO("syna_mode_switch set MODE_NORMAL finish\n");
 		break;
 	case MODE_GESTURE:
 		ret = syna_tcm_set_gesture_mode(tcm_hcd, flag);
@@ -3532,9 +3573,11 @@ static int syna_mode_switch(void *chip_data, work_mode mode, int flag)
 		}
 		break;
 	case MODE_SLEEP:
-		ret = syna_tcm_sleep(tcm_hcd, true);
-		if (ret < 0) {
-			TPD_INFO("%s: failed to switch to sleep", __func__);
+		if (ts != NULL && ts->is_suspended) {
+			ret = syna_tcm_sleep(tcm_hcd, true);
+			if (ret < 0) {
+				TPD_INFO("%s: failed to switch to sleep", __func__);
+			}
 		}
 		break;
 	case MODE_CHARGE:
@@ -3621,9 +3664,18 @@ static int syna_hw_reset(struct syna_tcm_hcd *tcm_hcd, struct hw_resource *hw_re
 int syna_reset_gpio(void *chip_data, bool enable)
 {
 	struct syna_tcm_hcd *tcm_hcd = (struct syna_tcm_hcd *)chip_data;
+	struct touchpanel_data *ts = spi_get_drvdata(tcm_hcd->s_client);
 
-	TPD_DEBUG("000 %s:gpio enable %d\n", __func__, enable);
+	if (!ts) {
+		TPD_INFO("%s, ts is NULL\n", __func__);
+		return -EINVAL;
+	}
+	TPD_INFO("000 %s:gpio enable %d, suspend_state = %d, tcm_hcd->request_fw_image_id =%d\n", __func__, enable, ts->suspend_state, tcm_hcd->request_fw_image_id);
 	if (gpio_is_valid(tcm_hcd->hw_res->reset_gpio)) {
+		/* if tp reset ,reset request_fw_image_id force to load normal fw*/
+		if (ts->suspend_state == TP_RESUME_EARLY_EVENT) {
+			tcm_hcd->request_fw_image_id = 0;
+		}
 		gpio_set_value(tcm_hcd->hw_res->reset_gpio, enable);
 	}
 	return 0;
@@ -3682,7 +3734,7 @@ void syna_fw_version_update(void *chip_data)
 	struct touchpanel_data *ts = spi_get_drvdata(tcm_hcd->s_client);
 	char *fw_ver = NULL;
 
-        tcm_hcd->app_info.customer_config_id[9] = '\0';
+        tcm_hcd->app_info.customer_config_id[15] = '\0';
 
 	if (strlen(tcm_hcd->app_info.customer_config_id) == 0) {
 		return;
@@ -3758,7 +3810,7 @@ static fw_update_state copy_fw_to_buffer(struct syna_tcm_hcd *tcm_hcd, const str
 		TPD_INFO("failed to get oplus tp firmware.\n");
 		return FW_UPDATE_ERROR;
 	}
-	return FW_UPDATE_ERROR;
+	return FW_UPDATE_SUCCESS;
 
 exit:
 	if(tp_fw) {
@@ -4090,6 +4142,8 @@ static int synaptics_auto_test_preoperation(struct seq_file *s, void *chip_data,
 	char *p_node = NULL;
 	char *postfix = "_TEST.img";
 	uint8_t copy_len = 0;
+
+	tcm_hcd->lpwg_fw_support_flag = ts->lpwg_fw_support;
 	ts->lpwg_fw_support = false;
 	TPD_INFO("%s  is called\n", __func__);
 
@@ -4150,7 +4204,7 @@ static int synaptics_auto_black_screen_test_endoperation(struct seq_file *s, voi
 	const struct firmware *fw = NULL;
 
 	TPD_INFO("%s  is called\n", __func__);
-	ts->lpwg_fw_support = true;
+	ts->lpwg_fw_support = tcm_hcd->lpwg_fw_support_flag;
 	ret = request_firmware(&fw, ts->panel_data.fw_name, ts->dev);
 	if (!ret) {
 		ts->loading_fw = true;
@@ -4615,10 +4669,15 @@ static int syna_testing_Doze_noise(struct seq_file *s, void *chip_data,
 	 return error_count;
 }
 
+static int raw_cap_data_restriction(int val, int raw_cap_restriction)
+{
+	return val * raw_cap_restriction / 100;
+}
+
 static int syna_testing_dynamic_range(struct seq_file *s, void *chip_data,
 					struct auto_testdata *syna_testdata, struct test_item_info *p_test_item_info)
 {
-	 int16_t data16 = 0;
+	 int16_t data16 = 0, r_u_data16 = 0;
 	 int i = 0, ret = 0, index = 0, byte_cnt = 2;
 	 int error_count = 0;
 	 struct syna_tcm_hcd *tcm_info = (struct syna_tcm_hcd *)chip_data;
@@ -4675,12 +4734,14 @@ static int syna_testing_dynamic_range(struct seq_file *s, void *chip_data,
 		   store_to_file(syna_testdata->fp, syna_testdata->length,
 					 syna_testdata->pos, "%04d, ", data16);
 
-		   if ((data16 < p_mutual_n[index]) || (data16 > p_mutual_p[index])) {
-			   TPD_INFO("rawcap test failed at node[%d]=%d [%d %d].\n", index, data16,
+		   r_u_data16 = raw_cap_data_restriction(data16, syna_testdata->raw_cap_restriction);
+
+		   if ((r_u_data16 < p_mutual_n[index]) || (r_u_data16 > p_mutual_p[index])) {
+			   TPD_INFO("rawcap test failed at node[%d]=%d restriction[%d] [%d %d].\n", index, data16, r_u_data16,
 					p_mutual_n[index], p_mutual_p[index]);
 
 			   if (!error_count) {
-				   seq_printf(s, "rawcap test failed at node[%d]=%d [%d %d].\n", index, data16,
+				   seq_printf(s, "rawcap test failed at node[%d]=%d restriction[%d] [%d %d].\n", index, data16, r_u_data16,
 						  p_mutual_n[index], p_mutual_p[index]);
 			   }
 			   error_count++;
@@ -5434,11 +5495,12 @@ void tp_wait_hdl_finished(void)
 
 	do {
 		if (retry_cnt) {
-			msleep(100);
+			msleep(10);
 		}
 		retry_cnt++;
-		TPD_INFO("Wait hdl finished retry %d times...  \n", retry_cnt);
-	} while (!g_tcm_hcd->hdl_finished_flag && retry_cnt < 20);
+		if ((retry_cnt % 10) == 0)
+			TPD_INFO("Wait hdl finished retry %d times...  \n", retry_cnt);
+	} while (!g_tcm_hcd->hdl_finished_flag && retry_cnt < 200);
 }
 
 /*
@@ -5616,6 +5678,7 @@ static void syna_tcm_parse_dts(struct syna_tcm_hcd *tcm_hcd, struct spi_device *
 
 	tcm_hcd->irq_trigger_hdl_support = of_property_read_bool(np, "synaptics,irq_trigger_hdl_support");
 	tcm_hcd->pt17_pt18_test_support = of_property_read_bool(np, "pt17_pt18_test_support");
+	tcm_hcd->hw_rt_retry_support = of_property_read_bool(np, "hw_rt_retry_support");
 }
 
 static int syna_tcm_spi_probe(struct spi_device *spi)
@@ -5644,6 +5707,7 @@ static int syna_tcm_spi_probe(struct spi_device *spi)
 	}
 
 	g_tcm_hcd = tcm_hcd;
+	tcm_hcd->ts = ts;
 	tcm_hcd->s_client = spi;
 	tcm_hcd->hw_res = &ts->hw_res;
 	tcm_hcd->rd_chunk_size = RD_CHUNK_SIZE;
@@ -5657,6 +5721,7 @@ static int syna_tcm_spi_probe(struct spi_device *spi)
 	tcm_hcd->tp_fw_update_first = false;
 	tcm_hcd->tp_fw_update_parse = true;
 	tcm_hcd->tp_irq_state = 1;
+	tcm_hcd->gesture_fw_finished_flag = 0;
 	ts->chip_data = tcm_hcd;
 
 	/*tcm_hcd->syna_ops = &syna_proc_ops;*/
@@ -5722,6 +5787,7 @@ static int syna_tcm_spi_probe(struct spi_device *spi)
 	ts->tp_resume_order = LCD_TP_RESUME;
 	ts->skip_reset_in_resume = true;
 	ts->skip_suspend_operate = true;
+	tcm_hcd->gesture_fw_finished_flag = 0;
 	/*ts->mode_switch_type = SINGLE;*/
 	if (!ts->irq_trigger_hdl_support) {
 		ts->irq_trigger_hdl_support = tcm_hcd->irq_trigger_hdl_support;

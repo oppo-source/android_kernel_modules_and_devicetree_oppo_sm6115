@@ -372,7 +372,7 @@ static int wcd_check_cross_conn(struct wcd_mbhc *mbhc)
 
 	#ifndef OPLUS_ARCH_EXTENDS
 	/* Add for log cross conn switch pop noise */
-	if (hphl_adc_res > mbhc->hphl_cross_conn_thr ||
+	if (hphl_adc_res > mbhc->hphl_cross_conn_thr &&
 	    hphr_adc_res > mbhc->hphr_cross_conn_thr) {
 		plug_type = MBHC_PLUG_TYPE_GND_MIC_SWAP;
 		pr_debug("%s: Cross connection identified\n", __func__);
@@ -386,7 +386,7 @@ static int wcd_check_cross_conn(struct wcd_mbhc *mbhc)
 	hphr_cross_conn_thr = (mbhc->hphr_cross_conn_thr * micbias_mv) / WCD_MBHC_ADC_MICBIAS_MV;
 	pr_debug("%s: hphl_cross_conn_thr = %d\n", __func__, hphl_cross_conn_thr);
 	pr_debug("%s: hphr_cross_conn_thr = %d\n", __func__, hphr_cross_conn_thr);
-	if (hphl_adc_res > hphl_cross_conn_thr ||
+	if (hphl_adc_res > hphl_cross_conn_thr &&
 	    hphr_adc_res > hphr_cross_conn_thr) {
 		plug_type = MBHC_PLUG_TYPE_GND_MIC_SWAP;
 		pr_debug("%s: Cross connection identified\n", __func__);
@@ -897,11 +897,6 @@ static int wcd_mbhc_get_plug_from_adc(struct wcd_mbhc *mbhc, int adc_result)
 	return plug_type;
 }
 
-#ifdef OPLUS_ARCH_EXTENDS
-/* try to switch mic and gnd if adc is lower than 700mv, 700 is an estimated value */
-#define TRY_SWITCH_THRESHOLD_MV    700
-#endif /* OPLUS_ARCH_EXTENDS */
-
 static void wcd_correct_swch_plug(struct work_struct *work)
 {
 	struct wcd_mbhc *mbhc;
@@ -929,6 +924,8 @@ static void wcd_correct_swch_plug(struct work_struct *work)
 	int output_mv_second = 0;
 	/* added for record the MBHC_PLUG_TYPE_GND_MIC_SWAP type has been detected after mic swap */
 	bool swap_type_cnt = false;
+	/* try to switch mic and gnd if adc is lower than 700mv, 700 is an estimated value */
+	int try_switch_threshold_mv = 700;
 	#endif /* OPLUS_ARCH_EXTENDS */
 
 #ifdef OPLUS_ARCH_EXTENDS
@@ -996,7 +993,16 @@ static void wcd_correct_swch_plug(struct work_struct *work)
 		WCD_MBHC_REG_UPDATE_BITS(WCD_MBHC_MICB2_VOUT, 0x22);
 		WCD_MBHC_REG_UPDATE_BITS(WCD_MBHC_MICB_CTRL, 1);
 		/* Add 10ms delay for micbias to settle */
+		#ifndef OPLUS_ARCH_EXTENDS
 		usleep_range(10000, 10100);
+		#else
+		/* add for avoid wcd abnormal status */
+		if (mbhc->avoid_abnormal_wcd_status) {
+			usleep_range(50000, 50100);
+		} else {
+			usleep_range(10000, 10100);
+		}
+		#endif
 		/* After micbias change, reget value for micbias_mv/hs_threshold */
 		micbias_mv = wcd_mbhc_get_micbias(mbhc);
 		pr_info("%s: get micbias_mv %d mv\n", __func__, micbias_mv);
@@ -1022,10 +1028,12 @@ static void wcd_correct_swch_plug(struct work_struct *work)
 
 	#ifdef OPLUS_ARCH_EXTENDS
 	/* Add for some sound card or microphone only support one connecting state */
+	if (mbhc->avoid_abnormal_wcd_status) {
+		try_switch_threshold_mv = 900;
+	}
 	if (((plug_type != MBHC_PLUG_TYPE_HEADSET) ||
-			(output_mv < TRY_SWITCH_THRESHOLD_MV)) &&
+			(output_mv < try_switch_threshold_mv)) &&
 	    (mbhc->mbhc_cfg->enable_usbc_analog) &&
-	    (!mbhc->need_cross_conn) &&
 	    (!wcd_swch_level_remove(mbhc))) {
 	    if (mbhc->mbhc_cfg->swap_gnd_mic &&
 			mbhc->mbhc_cfg->swap_gnd_mic(component, true)) {
@@ -1043,6 +1051,12 @@ static void wcd_correct_swch_plug(struct work_struct *work)
 				output_mv = output_mv_second;
 				plug_type = plug_type_second;
 			}
+		}
+		if (mbhc->avoid_abnormal_wcd_status) {
+			pr_info("%s: wait 50 ms for second check\n", __func__);
+			msleep(50);
+			output_mv = wcd_measure_adc_continuous(mbhc);
+			plug_type = wcd_mbhc_get_plug_from_adc(mbhc, output_mv);
 		}
 	}
 	#endif /* OPLUS_ARCH_EXTENDS */

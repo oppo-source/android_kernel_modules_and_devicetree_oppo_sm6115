@@ -33,6 +33,10 @@
 #define DEBUG_WARN_ON(x)
 #endif
 
+#include <linux/blkdev.h>
+struct blk_mq_tags;
+struct blk_mq_alloc_data;
+
 #define ux_err(fmt, ...) \
 		pr_err("[sched_assist][%s]"fmt, __func__, ##__VA_ARGS__)
 #define ux_warn(fmt, ...) \
@@ -66,6 +70,7 @@
 #define SA_TYPE_ANIMATOR			(1 << 2)
 /* SA_TYPE_LISTPICK for camera */
 #define SA_TYPE_LISTPICK			(1 << 3)
+#define SA_TYPE_MQ_VIP				(1 << 4)
 #define SA_OPT_SET					(1 << 7)
 #define SA_OPT_RESET				(1 << 8)
 #define SA_OPT_SET_PRIORITY			(1 << 9)
@@ -274,6 +279,7 @@ struct oplus_task_struct {
 	s8 ux_priority;
 	s8 ux_nice;
 	unsigned long im_flag;
+	atomic_t is_vip_mvp;
 #if IS_ENABLED(CONFIG_OPLUS_FEATURE_QOS_SCHED)
 	int qos_level;
 	int qos_recover_prio;
@@ -800,6 +806,7 @@ ssize_t oplus_show_cpus(const struct cpumask *mask, char *buf);
 void adjust_rt_lowest_mask(struct task_struct *p, struct cpumask *local_cpu_mask, int ret, bool force_adjust);
 bool sa_skip_rt_sync(struct rq *rq, struct task_struct *p, bool *sync);
 bool sa_rt_skip_ux_cpu(int cpu);
+int is_vip_mvp(struct task_struct *p);
 
 /* s64 account_ux_runtime(struct rq *rq, struct task_struct *curr); */
 void opt_ss_lock_contention(struct task_struct *p, int old_im, int new_im);
@@ -835,5 +842,8 @@ void android_vh_sched_setaffinity_early_handler(void *unused, struct task_struct
 #endif
 void android_rvh_set_cpus_allowed_by_task_handler(void *unused, const struct cpumask *cpu_valid_mask, const struct cpumask *new_mask,
 				struct task_struct *p, unsigned int *dest_cpu);
+
+void android_vh_blk_rq_ctx_init_handler(void *unused, struct request *rq, struct blk_mq_tags *tags, struct blk_mq_alloc_data *data, u64 alloc_time_ns);
+
 extern struct notifier_block process_exit_notifier_block;
 #endif /* _OPLUS_SA_COMMON_H_ */

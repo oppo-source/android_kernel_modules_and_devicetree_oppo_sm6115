@@ -551,10 +551,12 @@ struct syna_tcm_hcd {
 	bool tp_fw_update_headfile;
 	bool tp_fw_update_first;
 	bool tp_fw_update_parse;
+	bool lpwg_fw_support_flag;
 	int tp_irq_state;
 	int zeroflash_init_done;
 	int check_uboot_failed_count;
 	int request_fw_image_id;
+	int gesture_fw_finished_flag;
 
 	struct completion config_complete;
 	struct mutex reset_mutex;
@@ -598,6 +600,7 @@ struct syna_tcm_hcd {
 	bool health_monitor_support;
 	bool health_monitor_v2_support;
 	bool pt17_pt18_test_support;
+	bool hw_rt_retry_support;
 };
 
 struct device_hcd {

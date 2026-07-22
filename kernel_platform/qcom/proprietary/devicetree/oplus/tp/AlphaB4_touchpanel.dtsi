@@ -90,6 +90,7 @@
                  touchpanel.button-TRx = <0 0>;
                  touchpanel,irq_need_dev_resume_time = <500>;
                  touchpanel,int-mode = <1>;
+                 touchpanel,tp_ic_type = <2>;
                  tp_type = <15>;
                  platform_support_project = <24288 24289 24300 24301 24302 24303 24304 24306 24307 24308 24309>;
                  platform_support_project_dir = <24304 24304 24304 24304 24304 24304 24304 24304 24304 24304 24304>;

@@ -2680,6 +2680,12 @@ void wcd_mbhc_stop(struct wcd_mbhc *mbhc)
 		mbhc->mbhc_cal = NULL;
 	}
 
+#if IS_ENABLED(CONFIG_OPLUS_HS_G_DET)
+	if (gpio_is_valid(mbhc->usbc_insert_pin)) {
+		gpio_free(mbhc->usbc_insert_pin);
+		pr_info("%s: usbc_insert_pin is free \n", __func__);
+	}
+#endif /* CONFIG_OPLUS_HS_G_DET */
 	#if IS_ENABLED(CONFIG_QCOM_FSA4480_I2C)
 	if (mbhc->mbhc_cfg->enable_usbc_analog &&
 		mbhc->mbhc_cfg->fsa4480_support) {
@@ -2747,6 +2753,12 @@ int wcd_mbhc_init(struct wcd_mbhc *mbhc, struct snd_soc_component *component,
 	/* for gpio detect, donot close L_det */
 	u32 detect_mode = 0;
 	const char *mbhc_headset_detect_mode = "oplus,mbhc-headset-detect-mode";
+	#endif /* OPLUS_ARCH_EXTENDS */
+
+	#ifdef OPLUS_ARCH_EXTENDS
+	/* add for avoid abnormal wcd status */
+	const char *mbhc_avoid_abnormal_wcd_status = "oplus,mbhc-avoid-abnormal-wcd-status";
+	u32 avoid_abnormal_wcd_status = 0;
 	#endif /* OPLUS_ARCH_EXTENDS */
 
 	pr_debug("%s: enter\n", __func__);
@@ -2860,6 +2872,24 @@ int wcd_mbhc_init(struct wcd_mbhc *mbhc, struct snd_soc_component *component,
 			mbhc->headset_detect_mode = 1;
 		} else {
 			mbhc->headset_detect_mode = 0;
+		}
+	}
+	#endif /* OPLUS_ARCH_EXTENDS */
+
+	#ifdef OPLUS_ARCH_EXTENDS
+	/* add for avoid abnormal wcd status */
+	ret = of_property_read_u32(card->dev->of_node, mbhc_avoid_abnormal_wcd_status,
+				&avoid_abnormal_wcd_status);
+	if (ret) {
+		dev_info(card->dev,
+			"%s: missing %s in dt node\n", __func__, mbhc_avoid_abnormal_wcd_status);
+		mbhc->avoid_abnormal_wcd_status = 0;
+	} else {
+		dev_info(card->dev, "%s: avoid_abnormal_wcd_status %d\n", __func__, avoid_abnormal_wcd_status);
+		if (avoid_abnormal_wcd_status) {
+			mbhc->avoid_abnormal_wcd_status = 1;
+		} else {
+			mbhc->avoid_abnormal_wcd_status = 0;
 		}
 	}
 	#endif /* OPLUS_ARCH_EXTENDS */

@@ -213,10 +213,22 @@
 			oplus_boost_pool {
 				feature-disable;
 			};
+			ezreclaimd {
+				feature-enable;
+			};
+			oplus_bsp_mglru_opt {
+				feature-enable;
+			};
 		};
 		ram-6g {
 			oplus_boost_pool {
 				feature-disable;
+			};
+			ezreclaimd {
+				feature-enable;
+			};
+			oplus_bsp_mglru_opt {
+				feature-enable;
 			};
 		};
 	};
