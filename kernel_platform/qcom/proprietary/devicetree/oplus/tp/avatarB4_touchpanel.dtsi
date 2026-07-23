@@ -89,6 +89,7 @@
                  touchpanel,button-type = <4>;
                  touchpanel.button-TRx = <0 0>;
                  touchpanel,irq_need_dev_resume_time = <500>;
+                 touchpanel,tp_ic_type = <2>;
                  tp_type = <15>;
                  platform_support_project = <23311 23312 23313 23314 23316 23317 23318 23319>;
                  platform_support_project_dir = <23311 23311 23311 23311 23311 23311 23311 23311>;
